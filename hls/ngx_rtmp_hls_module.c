@@ -10,6 +10,9 @@
 #include <ngx_rtmp_cmd_module.h>
 #include <ngx_rtmp_codec_module.h>
 #include "ngx_rtmp_mpegts.h"
+#include <stdio.h>
+#include <curl/curl.h>
+#include <libgen.h>
 
 
 static ngx_rtmp_publish_pt              next_publish;
@@ -814,6 +817,38 @@ ngx_rtmp_hls_get_fragment_id(ngx_rtmp_session_t *s, uint64_t ts)
     }
 }
 
+static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* channel){
+    CURL *curl;
+    CURLcode res;
+    struct stat file_info;
+    FILE *fd;
+    fd = fopen(filepath, "rb");
+    if(!fd)
+        return 1;
+    if(fstat(fileno(fd), &file_info) != 0)
+        return 1;
+    curl = curl_easy_init();
+    if(curl) {
+        char buf[1024];
+        snprintf(buf, sizeof buf, "%s/%s/%s/%s", "http://10.139.12.23", bucketname, channel, basename(filepath));
+        struct curl_slist *chunk = NULL;
+        chunk = curl_slist_append(chunk, "x-amz-acl:public-read-write");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        curl_easy_setopt(curl, CURLOPT_URL, buf);
+        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(curl, CURLOPT_READDATA, fd);
+        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)file_info.st_size);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                    curl_easy_strerror(res));
+        }
+        curl_easy_cleanup(curl);
+    }
+    fclose(fd);
+    return 0;
+}
 
 static ngx_int_t
 ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
@@ -832,9 +867,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 
     ctx->opened = 0;
 
+    ngx_rtmp_hls_upload_s3(ctx->stream.data, "public", ctx->name.data);
+
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
+
+    ngx_rtmp_hls_upload_s3(ctx->playlist.data, "public", ctx->name.data);
 
     return NGX_OK;
 }
