@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <curl/curl.h>
 #include <libgen.h>
+#include <string.h>
 
 
 static ngx_rtmp_publish_pt              next_publish;
@@ -82,6 +83,9 @@ typedef struct {
     uint64_t                            aframe_pts;
 
     ngx_rtmp_hls_variant_t             *var;
+
+    u_char                              args[256];
+    u_char                              s3_bucket[256];
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -867,13 +871,20 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 
     ctx->opened = 0;
 
-    ngx_rtmp_hls_upload_s3(ctx->stream.data, "public", ctx->name.data);
+    char bucketchannel[256];
+    strncpy(bucketchannel, ctx->name.data, 256);
+    char *bucketname;
+    char *channelname;
+    bucketname = strtok (bucketchannel,"/");
+    channelname = strtok (NULL, "/");
+
+//    ngx_rtmp_hls_upload_s3(ctx->stream.data, "public", ctx->name.data);
 
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
 
-    ngx_rtmp_hls_upload_s3(ctx->playlist.data, "public", ctx->name.data);
+//    ngx_rtmp_hls_upload_s3(ctx->playlist.data, "public", ctx->name.data);
 
     return NGX_OK;
 }
@@ -1373,6 +1384,9 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 
     ctx->name.len = ngx_strlen(v->name);
     ctx->name.data = ngx_palloc(s->connection->pool, ctx->name.len + 1);
+
+    ngx_cpystrn(ctx->args, v->args, NGX_RTMP_MAX_ARGS);
+    ngx_cpystrn(ctx->s3_bucket, v->s3_bucket, NGX_RTMP_MAX_ARGS);
 
     if (ctx->name.data == NULL) {
         return NGX_ERROR;

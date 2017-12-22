@@ -506,6 +506,13 @@ ngx_rtmp_cmd_publish_init(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
                   "publish: name='%s' args='%s' type=%s silent=%d",
                   v.name, v.args, v.type, v.silent);
 
+    char bucketchannel[256];
+    strncpy(bucketchannel, s->swf_url.data, 256);
+    char *bucketname;
+    strtok (bucketchannel,"://");
+    bucketname = strtok (NULL, "./");
+    ngx_cpystrn(v.s3_bucket, bucketname, strlen(bucketname)+1);
+
     return ngx_rtmp_publish(s, &v);
 }
 

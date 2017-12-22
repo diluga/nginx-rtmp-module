@@ -55,6 +55,7 @@ typedef struct {
     u_char                          name[NGX_RTMP_MAX_NAME];
     u_char                          args[NGX_RTMP_MAX_ARGS];
     u_char                          type[16];
+    u_char                          s3_bucket[256];
     int                             silent;
 } ngx_rtmp_publish_t;
 
