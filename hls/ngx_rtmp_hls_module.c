@@ -821,7 +821,7 @@ ngx_rtmp_hls_get_fragment_id(ngx_rtmp_session_t *s, uint64_t ts)
     }
 }
 
-static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* channel){
+static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* channel, char* auth){
     CURL *curl;
     CURLcode res;
     struct stat file_info;
@@ -833,11 +833,17 @@ static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* 
         return 1;
     curl = curl_easy_init();
     if(curl) {
+
         char buf[1024];
-        snprintf(buf, sizeof buf, "%s/%s/%s/%s", "http://10.139.12.23", bucketname, channel, basename(filepath));
-        struct curl_slist *chunk = NULL;
-        chunk = curl_slist_append(chunk, "x-amz-acl:public-read-write");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        if(auth){
+            snprintf(buf, sizeof buf, "%s/%s/%s/%s?live&%s", "http://10.139.11.165:8000", bucketname, channel, basename(filepath), auth);
+        }else{
+            snprintf(buf, sizeof buf, "%s/%s/%s/%s", "http://10.139.11.165:8000", bucketname, channel, basename(filepath));
+            struct curl_slist *chunk = NULL;
+            chunk = curl_slist_append(chunk, "x-amz-acl:public-read-write");
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        }
+        
         curl_easy_setopt(curl, CURLOPT_URL, buf);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
         curl_easy_setopt(curl, CURLOPT_READDATA, fd);
@@ -871,20 +877,14 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 
     ctx->opened = 0;
 
-    char bucketchannel[256];
-    strncpy(bucketchannel, ctx->name.data, 256);
-    char *bucketname;
-    char *channelname;
-    bucketname = strtok (bucketchannel,"/");
-    channelname = strtok (NULL, "/");
 
-//    ngx_rtmp_hls_upload_s3(ctx->stream.data, "public", ctx->name.data);
+    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->s3_bucket, ctx->name.data, ctx->args);
 
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
 
-//    ngx_rtmp_hls_upload_s3(ctx->playlist.data, "public", ctx->name.data);
+    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->s3_bucket, ctx->name.data, ctx->args);
 
     return NGX_OK;
 }
