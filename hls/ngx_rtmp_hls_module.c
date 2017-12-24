@@ -86,6 +86,7 @@ typedef struct {
 
     u_char                              args[256];
     u_char                              s3_bucket[256];
+    u_char                              rgw_endpoint[32];
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -121,6 +122,7 @@ typedef struct {
     ngx_str_t                           key_path;
     ngx_str_t                           key_url;
     ngx_uint_t                          frags_per_key;
+    ngx_str_t                           rgw_endpoint;
 } ngx_rtmp_hls_app_conf_t;
 
 
@@ -313,6 +315,13 @@ static ngx_command_t ngx_rtmp_hls_commands[] = {
       ngx_conf_set_num_slot,
       NGX_RTMP_APP_CONF_OFFSET,
       offsetof(ngx_rtmp_hls_app_conf_t, frags_per_key),
+      NULL },
+
+    { ngx_string("rgw_endpoint"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_hls_app_conf_t, rgw_endpoint),
       NULL },
 
     ngx_null_command
@@ -821,7 +830,7 @@ ngx_rtmp_hls_get_fragment_id(ngx_rtmp_session_t *s, uint64_t ts)
     }
 }
 
-static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* channel, char* auth){
+static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* rgw_endpoint, char* bucketname, char* channel, char* auth){
     CURL *curl;
     CURLcode res;
     struct stat file_info;
@@ -836,14 +845,14 @@ static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* bucketname, char* 
 
         char buf[1024];
         if(auth){
-            snprintf(buf, sizeof buf, "%s/%s/%s/%s?live&%s", "http://10.139.11.165:8000", bucketname, channel, basename(filepath), auth);
+            snprintf(buf, sizeof buf, "%s/%s/%s/%s?live&%s", rgw_endpoint, bucketname, channel, basename(filepath), auth);
         }else{
-            snprintf(buf, sizeof buf, "%s/%s/%s/%s", "http://10.139.11.165:8000", bucketname, channel, basename(filepath));
+            snprintf(buf, sizeof buf, "%s/%s/%s/%s", rgw_endpoint, bucketname, channel, basename(filepath));
             struct curl_slist *chunk = NULL;
             chunk = curl_slist_append(chunk, "x-amz-acl:public-read-write");
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
         }
-        
+
         curl_easy_setopt(curl, CURLOPT_URL, buf);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
         curl_easy_setopt(curl, CURLOPT_READDATA, fd);
@@ -877,14 +886,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 
     ctx->opened = 0;
 
-
-    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->s3_bucket, ctx->name.data, ctx->args);
+    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->rgw_endpoint, ctx->s3_bucket, ctx->name.data, ctx->args);
 
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
 
-    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->s3_bucket, ctx->name.data, ctx->args);
+    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->rgw_endpoint, ctx->s3_bucket, ctx->name.data, ctx->args);
 
     return NGX_OK;
 }
@@ -1387,6 +1395,7 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 
     ngx_cpystrn(ctx->args, v->args, NGX_RTMP_MAX_ARGS);
     ngx_cpystrn(ctx->s3_bucket, v->s3_bucket, NGX_RTMP_MAX_ARGS);
+    ngx_cpystrn(ctx->rgw_endpoint, hacf->rgw_endpoint.data, 32);
 
     if (ctx->name.data == NULL) {
         return NGX_ERROR;
@@ -2362,6 +2371,7 @@ ngx_rtmp_hls_create_app_conf(ngx_conf_t *cf)
     conf->granularity = NGX_CONF_UNSET;
     conf->keys = NGX_CONF_UNSET;
     conf->frags_per_key = NGX_CONF_UNSET_UINT;
+//    conf->rgw_endpoint = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
@@ -2400,6 +2410,7 @@ ngx_rtmp_hls_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->key_path, prev->key_path, "");
     ngx_conf_merge_str_value(conf->key_url, prev->key_url, "");
     ngx_conf_merge_uint_value(conf->frags_per_key, prev->frags_per_key, 0);
+    ngx_conf_merge_str_value(conf->rgw_endpoint, prev->rgw_endpoint, "");
 
     if (conf->fraglen) {
         conf->winfrags = conf->playlen / conf->fraglen;
