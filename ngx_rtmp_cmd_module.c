@@ -512,6 +512,7 @@ ngx_rtmp_cmd_publish_init(ngx_rtmp_session_t *s, ngx_rtmp_header_t *h,
     strtok (bucketchannel,"://");
     bucketname = strtok (NULL, "./");
     ngx_cpystrn(v.s3_bucket, bucketname, strlen(bucketname)+1);
+    ngx_cpystrn(v.name+strlen(v.name), bucketname, strlen(bucketname)+1);
 
     return ngx_rtmp_publish(s, &v);
 }

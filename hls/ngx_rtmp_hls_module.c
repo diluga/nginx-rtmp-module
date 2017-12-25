@@ -844,7 +844,7 @@ static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* rgw_endpoint, char
     if(curl) {
 
         char buf[1024];
-        if(auth){
+        if(auth[0] != 0){
             snprintf(buf, sizeof buf, "%s/%s/%s/%s?live&%s", rgw_endpoint, bucketname, channel, basename(filepath), auth);
         }else{
             snprintf(buf, sizeof buf, "%s/%s/%s/%s", rgw_endpoint, bucketname, channel, basename(filepath));
@@ -886,13 +886,16 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 
     ctx->opened = 0;
 
-    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->rgw_endpoint, ctx->s3_bucket, ctx->name.data, ctx->args);
+    char channel[256];
+    *ngx_cpymem(channel, ctx->name.data, ctx->name.len-strlen(ctx->s3_bucket)) = 0;
+
+    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args);
 
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
 
-    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->rgw_endpoint, ctx->s3_bucket, ctx->name.data, ctx->args);
+    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args);
 
     return NGX_OK;
 }
