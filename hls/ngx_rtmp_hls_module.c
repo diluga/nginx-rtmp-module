@@ -830,7 +830,7 @@ ngx_rtmp_hls_get_fragment_id(ngx_rtmp_session_t *s, uint64_t ts)
     }
 }
 
-static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* rgw_endpoint, char* bucketname, char* channel, char* auth){
+static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* rgw_endpoint, char* bucketname, char* channel, char* auth, double frags_duration){
     CURL *curl;
     CURLcode res;
     struct stat file_info;
@@ -846,13 +846,22 @@ static ngx_int_t ngx_rtmp_hls_upload_s3(char* filepath, char* rgw_endpoint, char
         char buf[1024];
         if(auth[0] != 0){
             snprintf(buf, sizeof buf, "%s/%s/%s/%s?live&%s", rgw_endpoint, bucketname, channel, basename(filepath), auth);
+            struct curl_slist *chunk = NULL;
+            char x_amz_meta_ts_duration[32];
+            ngx_memzero(x_amz_meta_ts_duration,32);
+            snprintf(x_amz_meta_ts_duration, sizeof x_amz_meta_ts_duration, "x-amz-meta-ts-duration:%.3f", frags_duration);
+            chunk = curl_slist_append(chunk, x_amz_meta_ts_duration);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
         }else{
             snprintf(buf, sizeof buf, "%s/%s/%s/%s", rgw_endpoint, bucketname, channel, basename(filepath));
             struct curl_slist *chunk = NULL;
-            chunk = curl_slist_append(chunk, "x-amz-acl:public-read-write");
+            chunk = curl_slist_append(chunk, "x-amz-acl:public-read");
+            char x_amz_meta_ts_duration[32];
+            ngx_memzero(x_amz_meta_ts_duration,32);
+            snprintf(x_amz_meta_ts_duration, sizeof x_amz_meta_ts_duration, "x-amz-meta-ts-duration:%.3f", frags_duration);
+            chunk = curl_slist_append(chunk, x_amz_meta_ts_duration);
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
         }
-
         curl_easy_setopt(curl, CURLOPT_URL, buf);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
         curl_easy_setopt(curl, CURLOPT_READDATA, fd);
@@ -889,13 +898,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     char channel[256];
     *ngx_cpymem(channel, ctx->name.data, ctx->name.len-strlen(ctx->s3_bucket)) = 0;
 
-    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args);
+    ngx_rtmp_hls_upload_s3(ctx->stream.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args, ctx->frags->duration);
 
     ngx_rtmp_hls_next_frag(s);
 
     ngx_rtmp_hls_write_playlist(s);
 
-    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args);
+    ngx_rtmp_hls_upload_s3(ctx->playlist.data, ctx->rgw_endpoint, ctx->s3_bucket, channel, ctx->args, 0.000);
 
     return NGX_OK;
 }
@@ -2374,7 +2383,6 @@ ngx_rtmp_hls_create_app_conf(ngx_conf_t *cf)
     conf->granularity = NGX_CONF_UNSET;
     conf->keys = NGX_CONF_UNSET;
     conf->frags_per_key = NGX_CONF_UNSET_UINT;
-//    conf->rgw_endpoint = NGX_CONF_UNSET_UINT;
 
     return conf;
 }
