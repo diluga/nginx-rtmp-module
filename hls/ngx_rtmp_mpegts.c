@@ -7,7 +7,8 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include "ngx_rtmp_mpegts.h"
-
+#include "include/rados/librgw.h"
+#include "include/rados/rgw_file.h"
 
 static u_char ngx_rtmp_mpegts_header[] = {
 
@@ -352,6 +353,50 @@ ngx_int_t
 ngx_rtmp_mpegts_open_file(ngx_rtmp_mpegts_file_t *file, u_char *path,
     ngx_log_t *log)
 {
+
+    librgw_t rgw = NULL;
+    struct rgw_fs *fs = NULL;
+
+    uint32_t owner_uid = 867;
+    uint32_t owner_gid = 5309;
+    uint32_t create_mask = RGW_SETATTR_UID | RGW_SETATTR_GID | RGW_SETATTR_MODE;
+
+    char* bucket_name = "sorry_dave";
+    char* object_name = "jocaml";
+
+    struct rgw_file_handle *bucket_fh = NULL;
+    struct rgw_file_handle *object_fh = NULL;
+
+    char *argv[5] = {"any","--access=yly", "--secret=yly", "--uid=yly", "--conf=/ceph/ceph/build/ceph.conf" };
+    librgw_create(&rgw, 5, argv);
+    rgw_mount2(rgw, "yly", "yly",
+               "yly", "/", &fs, RGW_MOUNT_FLAG_NONE);
+
+    struct stat st;
+    struct rgw_file_handle *fh;
+
+    st.st_uid = owner_uid;
+    st.st_gid = owner_gid;
+    st.st_mode = 755;
+
+    rgw_mkdir(fs, fs->root_fh, bucket_name, &st, create_mask,
+              &fh, RGW_MKDIR_FLAG_NONE);
+
+    rgw_lookup(fs, fs->root_fh, bucket_name, &bucket_fh,
+               RGW_LOOKUP_FLAG_NONE);
+
+    rgw_lookup(fs, bucket_fh, object_name, &object_fh,
+               RGW_LOOKUP_FLAG_CREATE);
+
+    rgw_open(fs, object_fh, 0 /* posix flags */, RGW_OPEN_FLAG_NONE);
+
+    size_t nbytes;
+    char * data = "hi mom";
+    rgw_write(fs, object_fh, 0, 6, &nbytes,
+              (void*) data, RGW_WRITE_FLAG_NONE);
+
+    rgw_close(fs, object_fh, RGW_CLOSE_FLAG_NONE);
+
     file->log = log;
 
     file->fd = ngx_open_file(path, NGX_FILE_WRONLY, NGX_FILE_TRUNCATE,
