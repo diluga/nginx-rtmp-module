@@ -1,3 +1,23 @@
+# librgw
+CFLAGS =  -pipe  -O0 -W -Wall -Wpointer-arith -Wno-unused -Wno-error -g -std=c++17 -D__STDC_FORMAT_MACROS $(ALL_INCS)
+ALL_INCS = -I src/core \
+        -I src/event \
+        -I src/event/modules \
+        -I src/os/unix \
+        -I /root/nginx-rtmp-module \
+        -I objs \
+        -I src/http \
+        -I /ceph/ceph/src \
+        -I /ceph/ceph/src/include \
+        -I /ceph/ceph/build/include \
+        -I /ceph/ceph/build/boost/include \
+
+
+        objs/ngx_modules.o \
+        -L/ceph/ceph/build/lib -ldl -lpthread -lcrypt -lpcre -lssl -lcrypto -ldl -lz -lpthread -lglobal -lrgw_a -ltest_rgw_a -lcls_rgw_client -lcls_lock_client -lcls_refcount_client -lrgw -lrgw_admin_user -lcls_otp_client -lrados -lcls_rgw_client -lceph-common \
+        -Wl,-E
+
+
 # NGINX-based Media Streaming Server
 ## nginx-rtmp-module
 
