@@ -1,3 +1,7 @@
+# LIBS
+```
+./configure --add-module=../nginx-rtmp-module --with-debug --with-cc-opt='-O0 -g -Wno-error' --with-ld-opt="-ls3"
+```
 # NGINX-based Media Streaming Server
 ## nginx-rtmp-module
 
