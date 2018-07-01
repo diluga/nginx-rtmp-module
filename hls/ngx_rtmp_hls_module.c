@@ -10,6 +10,9 @@
 #include <ngx_rtmp_cmd_module.h>
 #include <ngx_rtmp_codec_module.h>
 #include "ngx_rtmp_mpegts.h"
+#include "../ngx_rtmp.h"
+#include "libs3.h"
+#include <sys/stat.h>
 
 
 static ngx_rtmp_publish_pt              next_publish;
@@ -478,9 +481,34 @@ ngx_rtmp_hls_write_variant_playlist(ngx_rtmp_session_t *s)
     return NGX_OK;
 }
 
+typedef struct put_object_callback_data
+{
+  FILE *infile;
+  uint64_t contentLength;
+} put_object_callback_data;
+
+static int putObjectDataCallback(int bufferSize, char *buffer, void *callbackData)
+{
+    put_object_callback_data *data = (put_object_callback_data *) callbackData;
+    int ret = 0;
+    if (data->contentLength) {
+        int toRead = ((data->contentLength > (unsigned) bufferSize) ? (unsigned) bufferSize : data->contentLength);
+        ret = fread(buffer, 1, toRead, data->infile);
+    }
+    data->contentLength -= ret;
+    return ret;
+}
+
+static S3Status responsePropertiesCallback(const S3ResponseProperties *properties, void *callbackData) {
+    return S3StatusOK;
+}
+
+static void responseCompleteCallback(S3Status status, const S3ErrorDetails *error, void *callbackData) {
+    return;
+}
 
 static ngx_int_t
-ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s)
+ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket, u_char *access_key, u_char *secret_key, u_char *acl)
 {
     static u_char                   buffer[1024];
     ngx_fd_t                        fd;
@@ -608,6 +636,45 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s)
     if (ctx->var) {
         return ngx_rtmp_hls_write_variant_playlist(s);
     }
+
+    S3_initialize("s3", S3_INIT_ALL, host);
+
+    put_object_callback_data data;
+    struct stat statbuf;
+    if (stat(ctx->playlist.data, &statbuf) == -1)
+        return NGX_ERROR;
+    int contentLength = statbuf.st_size;
+    data.contentLength = contentLength;
+    if (!(data.infile = fopen(ctx->playlist.data, "rb")))
+        return NGX_ERROR;
+
+    S3ResponseHandler responseHandler =
+      {
+        &responsePropertiesCallback,
+        &responseCompleteCallback
+      };
+
+    S3PutObjectHandler putObjectHandler =
+      {
+        responseHandler,
+        &putObjectDataCallback
+      };
+
+    S3BucketContext bucketContext =
+      {
+        host,
+        bucket,
+        S3ProtocolHTTP,
+        S3UriStylePath,
+        access_key,
+        secret_key
+      };
+
+    S3_put_object(&bucketContext, basename(ctx->playlist.data), contentLength, NULL, NULL,
+                  &putObjectHandler, &data);
+
+    fclose(data.infile);
+    S3_deinitialize();
 
     return NGX_OK;
 }
@@ -828,13 +895,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                    "hls: close fragment n=%uL", ctx->frag);
 
-    ngx_rtmp_mpegts_close_file(&ctx->file);
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", "aws4c", basename(ctx->stream.data), "yly", "yly", "private");
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s);
+    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", "aws4c", "yly", "yly", "private");
 
     return NGX_OK;
 }

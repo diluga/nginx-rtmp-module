@@ -7,7 +7,8 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include "ngx_rtmp_mpegts.h"
-
+#include "libs3.h"
+#include <sys/stat.h>
 
 static u_char ngx_rtmp_mpegts_header[] = {
 
@@ -375,9 +376,34 @@ ngx_rtmp_mpegts_open_file(ngx_rtmp_mpegts_file_t *file, u_char *path,
     return NGX_OK;
 }
 
+typedef struct put_object_callback_data
+{
+  FILE *infile;
+  uint64_t contentLength;
+} put_object_callback_data;
+
+static int putObjectDataCallback(int bufferSize, char *buffer, void *callbackData)
+{
+    put_object_callback_data *data = (put_object_callback_data *) callbackData;
+    int ret = 0;
+    if (data->contentLength) {
+        int toRead = ((data->contentLength > (unsigned) bufferSize) ? (unsigned) bufferSize : data->contentLength);
+        ret = fread(buffer, 1, toRead, data->infile);
+    }
+    data->contentLength -= ret;
+    return ret;
+}
+
+static S3Status responsePropertiesCallback(const S3ResponseProperties *properties, void *callbackData) {
+    return S3StatusOK;
+}
+
+static void responseCompleteCallback(S3Status status, const S3ErrorDetails *error, void *callbackData) {
+    return;
+}
 
 ngx_int_t
-ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file)
+ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file, u_char *path, u_char *host, u_char *bucket, u_char *key, u_char *access_key, u_char *secret_key,u_char *acl)
 {
     u_char   buf[16];
     ssize_t  rc;
@@ -394,6 +420,48 @@ ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file)
     }
 
     ngx_close_file(file->fd);
+
+    S3_initialize("s3", S3_INIT_ALL, host);
+
+    put_object_callback_data data;
+    struct stat statbuf;
+    if (stat(path, &statbuf) == -1)
+        return NGX_ERROR;
+    int contentLength = statbuf.st_size;
+    data.contentLength = contentLength;
+    if (!(data.infile = fopen(path, "rb")))
+        return NGX_ERROR;
+
+    S3ResponseHandler responseHandler =
+      {
+        &responsePropertiesCallback,
+        &responseCompleteCallback
+      };
+
+    S3PutObjectHandler putObjectHandler =
+      {
+        responseHandler,
+        &putObjectDataCallback
+      };
+
+    S3BucketContext bucketContext =
+      {
+        host,
+        bucket,
+        S3ProtocolHTTP,
+        S3UriStylePath,
+        access_key,
+        secret_key
+      };
+
+    S3_put_object(&bucketContext, key, contentLength, NULL, NULL,
+                  &putObjectHandler, &data);
+
+    fclose(data.infile);
+    S3_deinitialize();
+
+    if (ngx_delete_file(path) == NGX_FILE_ERROR)
+        return NGX_ERROR;
 
     return NGX_OK;
 }
