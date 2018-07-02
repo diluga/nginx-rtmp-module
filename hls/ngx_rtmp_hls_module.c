@@ -13,7 +13,7 @@
 #include "../ngx_rtmp.h"
 #include "libs3.h"
 #include <sys/stat.h>
-
+#include <time.h>
 
 static ngx_rtmp_publish_pt              next_publish;
 static ngx_rtmp_close_stream_pt         next_close_stream;
@@ -602,10 +602,30 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
 
         prev_key_id = f->key_id;
 
+        u_char  presigned_buffer[S3_MAX_AUTHENTICATED_QUERY_STRING_SIZE];
+        u_char  key_buffer[S3_MAX_KEY_SIZE];
+        u_char  *key_p, *key_end;
+        key_p = key_buffer;
+        key_end = key_p + sizeof(key_buffer);
+        ngx_str_t key_part;
+        key_p = ngx_slprintf(key_p, key_end, "%V%s%uL.ts",&name_part, sep, f->id);
+        S3BucketContext bucketContext =
+          {
+            host,
+            bucket,
+            S3ProtocolHTTP,
+            S3UriStylePath,
+            access_key,
+            secret_key
+          };
+
+        int64_t expires = time(NULL) + 60 * 60; // Current time + 5 minutes
+        S3_generate_authenticated_query_string(presigned_buffer, &bucketContext, key_buffer, expires, NULL);
+
         p = ngx_slprintf(p, end,
                          "#EXTINF:%.3f,\n"
-                         "%V%V%s%uL.ts\n",
-                         f->duration, &hacf->base_url, &name_part, sep, f->id);
+                         "%V%V%s%uL.ts%s\n",
+                         f->duration, &hacf->base_url, &name_part, sep, f->id, presigned_buffer+strlen("http://")+strlen(host)+strlen(bucket)+strlen(key_buffer)+strlen("?")+1);
 
         ngx_log_debug5(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                        "hls: fragment frag=%uL, n=%ui/%ui, duration=%.3f, "
@@ -895,13 +915,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                    "hls: close fragment n=%uL", ctx->frag);
 
-    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", "aws4c", basename(ctx->stream.data), "yly", "yly", "private");
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", "aws4rtmp", basename(ctx->stream.data), "yly", "yly", "private");
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", "aws4c", "yly", "yly", "private");
+    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", "aws4rtmp", "yly", "yly", "private");
 
     return NGX_OK;
 }
