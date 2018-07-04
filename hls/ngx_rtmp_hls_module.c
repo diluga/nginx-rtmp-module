@@ -82,6 +82,7 @@ typedef struct {
     uint64_t                            aframe_pts;
 
     ngx_rtmp_hls_variant_t             *var;
+    u_char                              args[256];
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -944,13 +945,49 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                    "hls: close fragment n=%uL", ctx->frag);
 
-    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", "aws4rtmp", basename(ctx->stream.data), "yly", "yly", "private");
+    char * pch;
+    char str[256];
+    memset(str, 0, 256);
+    strcpy(str, &ctx->args);
+    pch=strchr(str,'&');
+    int start = 0;
+    int end = 0;
+    char bucket[256];
+//    char access_key[256];
+//    char expires[256];
+    memset(bucket, 0, 256);
+//    memset(access_key, 0, 256);
+//    memset(expires, 0, 256);
+
+    while (pch!=NULL)
+    {
+        char buf[256];
+        memset(buf, 0, 256);
+        snprintf(buf, pch-str+1-start, str+start);
+        start = pch-str+1;
+        if (strncmp(buf,"Bucket=",7) == 0) {
+            strcpy(bucket, buf+7);
+        }
+//        if (strncmp(buf,"AccessKeyId=",12) == 0) {
+//            strcpy(access_key, buf+12);
+//        }
+//        if (strncmp(buf,"Expires=",8) == 0) {
+//            strcpy(expires, buf+8);
+//        }
+        pch=strchr(pch+1,'&');
+    }
+
+//    printf("%s\n", bucket);
+//    printf("%s\n", access_key);
+//    printf("%s\n", expires);
+
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", bucket, basename(ctx->stream.data), "yly", "yly", "private");
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", "aws4rtmp", "yly", "yly", "private");
+    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", bucket, "yly", "yly", "private");
 
     return NGX_OK;
 }
@@ -1450,6 +1487,7 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 
     ctx->name.len = ngx_strlen(v->name);
     ctx->name.data = ngx_palloc(s->connection->pool, ctx->name.len + 1);
+    ngx_cpystrn(ctx->args, v->args, NGX_RTMP_MAX_ARGS);
 
     if (ctx->name.data == NULL) {
         return NGX_ERROR;
