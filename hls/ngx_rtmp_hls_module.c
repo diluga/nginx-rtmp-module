@@ -656,7 +656,13 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
             secret_key
           };
 
-        int64_t expires = time(NULL) + 60 * 60; // Current time + 60 minutes
+        int64_t expires;
+        if (strlen(ctx->Expires)>0) {
+            expires = strtol (ctx->Expires, NULL, 0);
+        } else {
+            expires = time(NULL) + 5 * 60; // Current time + 5 minutes
+        }
+
         S3_generate_authenticated_query_string(presigned_buffer, &bucketContext, key_buffer, expires, NULL);
 
         if (!strcmp(acl, "public-read")) {
