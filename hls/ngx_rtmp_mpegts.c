@@ -454,7 +454,21 @@ ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file, u_char *path, u_char *h
         secret_key
       };
 
-    S3_put_object(&bucketContext, key, contentLength, NULL, NULL,
+    S3PutProperties putProperties =
+      {
+        0, //content-type defaults to "binary/octet-stream"
+        0, //md5 sum, not required
+        0, //cacheControl, not required
+        0, //contentDispositionFilename, This is only relevent for objects which are intended to be shared to users via web browsers and which is additionally intended to be downloaded rather than viewed.
+        0, //contentEncoding, This is only applicable to encoded (usually, compressed) content, and only relevent if the object is intended to be downloaded via a browser.
+        (int64_t)-1,  //expires, This information is typically only delivered to users who download the content via a web browser.
+        S3CannedAclBucketOwnerFullControl,
+        0, //metaPropertiesCount, This is the number of values in the metaData field.
+        0 //metaProperties
+      };
+
+
+    S3_put_object(&bucketContext, key, contentLength, &putProperties, NULL, 
                   &putObjectHandler, &data);
 
     fclose(data.infile);

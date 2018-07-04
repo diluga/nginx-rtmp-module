@@ -604,6 +604,10 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
 
         u_char  presigned_buffer[S3_MAX_AUTHENTICATED_QUERY_STRING_SIZE];
         u_char  key_buffer[S3_MAX_KEY_SIZE];
+
+        ngx_memzero(presigned_buffer, S3_MAX_AUTHENTICATED_QUERY_STRING_SIZE);
+        ngx_memzero(key_buffer, S3_MAX_KEY_SIZE);
+
         u_char  *key_p, *key_end;
         key_p = key_buffer;
         key_end = key_p + sizeof(key_buffer);
@@ -619,13 +623,23 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
             secret_key
           };
 
-        int64_t expires = time(NULL) + 60 * 60; // Current time + 5 minutes
+        int64_t expires = time(NULL) + 60 * 60; // Current time + 60 minutes
         S3_generate_authenticated_query_string(presigned_buffer, &bucketContext, key_buffer, expires, NULL);
+
+//        char * pch, * ts_name;
+//        pch=strchr(presigned_buffer,'/');
+//        int pos = 4;
+//        while (pos > 0 )
+//        {
+//          ts_name = pch;
+//          pch=strchr(pch+1,'/');
+//          pos --;
+//        }
 
         p = ngx_slprintf(p, end,
                          "#EXTINF:%.3f,\n"
-                         "%V%V%s%uL.ts%s\n",
-                         f->duration, &hacf->base_url, &name_part, sep, f->id, presigned_buffer+strlen("http://")+strlen(host)+strlen(bucket)+strlen(key_buffer)+strlen("?")+1);
+                           "%V%s\n",
+                         f->duration, &hacf->base_url, presigned_buffer);
 
         ngx_log_debug5(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                        "hls: fragment frag=%uL, n=%ui/%ui, duration=%.3f, "
@@ -690,11 +704,26 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         secret_key
       };
 
-    S3_put_object(&bucketContext, basename(ctx->playlist.data), contentLength, NULL, NULL,
+    S3PutProperties putProperties =
+      {
+        0, //content-type defaults to "binary/octet-stream"
+        0, //md5 sum, not required
+        0, //cacheControl, not required
+        0, //contentDispositionFilename, This is only relevent for objects which are intended to be shared to users via web browsers and which is additionally intended to be downloaded rather than viewed.
+        0, //contentEncoding, This is only applicable to encoded (usually, compressed) content, and only relevent if the object is intended to be downloaded via a browser.
+        (int64_t)-1,  //expires, This information is typically only delivered to users who download the content via a web browser.
+        S3CannedAclBucketOwnerFullControl,
+        0, //metaPropertiesCount, This is the number of values in the metaData field.
+        0 //metaProperties
+      };
+
+    S3_put_object(&bucketContext, basename(ctx->playlist.data), contentLength, &putProperties, NULL,
                   &putObjectHandler, &data);
 
     fclose(data.infile);
     S3_deinitialize();
+    if (ngx_delete_file(ctx->playlist.data) == NGX_FILE_ERROR)
+      return NGX_ERROR;
 
     return NGX_OK;
 }

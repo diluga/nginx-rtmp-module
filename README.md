@@ -1,7 +1,12 @@
-# LIBS
+# libs3 so
 ```
 ./configure --add-module=../nginx-rtmp-module --with-debug --with-cc-opt='-O0 -g -Wno-error' --with-ld-opt="-ls3"
 ```
+# libs3 static 
+```
+./configure --add-module=../nginx-rtmp-module --with-debug --with-cc-opt='-O0 -g -Wno-error' --with-ld-opt="/usr/lib64/libs3.a  -lxml2 -lz -lm -ldl -lcurl -lpthread"
+```
+
 # NGINX-based Media Streaming Server
 ## nginx-rtmp-module
 
