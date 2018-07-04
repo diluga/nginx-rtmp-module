@@ -12,6 +12,7 @@
 #include "ngx_rtmp_mpegts.h"
 #include "../ngx_rtmp.h"
 #include "libs3.h"
+#include "../ngx_rtmp_cmd_module.h"
 #include <sys/stat.h>
 #include <time.h>
 
@@ -83,6 +84,12 @@ typedef struct {
 
     ngx_rtmp_hls_variant_t             *var;
     u_char                              args[256];
+    u_char                              Bucket[256];
+    u_char                              playlistName[256];
+    u_char                              AccessKeyId[256];
+    u_char                              Expires[256];
+    u_char                              Signature[256];
+    u_char                              Channel[256];
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -509,7 +516,7 @@ static void responseCompleteCallback(S3Status status, const S3ErrorDetails *erro
 }
 
 static ngx_int_t
-ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket, u_char *access_key, u_char *secret_key, u_char *acl)
+ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket, u_char *access_key, u_char *secret_key, u_char *acl,  u_char *channel)
 {
     static u_char                   buffer[1024];
     ngx_fd_t                        fd;
@@ -613,7 +620,7 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         key_p = key_buffer;
         key_end = key_p + sizeof(key_buffer);
         ngx_str_t key_part;
-        key_p = ngx_slprintf(key_p, key_end, "%V%s%uL.ts",&name_part, sep, f->id);
+        key_p = ngx_slprintf(key_p, key_end, "%s/%V%s%uL.ts",channel, &name_part, sep, f->id);
         S3BucketContext bucketContext =
           {
             host,
@@ -627,15 +634,6 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         int64_t expires = time(NULL) + 60 * 60; // Current time + 60 minutes
         S3_generate_authenticated_query_string(presigned_buffer, &bucketContext, key_buffer, expires, NULL);
 
-//        char * pch, * ts_name;
-//        pch=strchr(presigned_buffer,'/');
-//        int pos = 4;
-//        while (pos > 0 )
-//        {
-//          ts_name = pch;
-//          pch=strchr(pch+1,'/');
-//          pos --;
-//        }
 
         p = ngx_slprintf(p, end,
                          "#EXTINF:%.3f,\n"
@@ -718,7 +716,13 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         0 //metaProperties
       };
 
-    S3_put_object(&bucketContext, basename(ctx->playlist.data), contentLength, &putProperties, NULL,
+    char playlist_key[256];
+    memset(playlist_key, 0, 256);
+    ngx_cpystrn(playlist_key, channel, strlen(channel)+1);
+    ngx_cpystrn(playlist_key + strlen(playlist_key), "/", 1+1);
+    ngx_cpystrn(playlist_key + strlen(playlist_key), basename(ctx->playlist.data), strlen(basename(ctx->playlist.data))+1);
+
+    S3_put_object(&bucketContext, playlist_key, contentLength, &putProperties, NULL,
                   &putObjectHandler, &data);
 
     fclose(data.infile);
@@ -945,49 +949,19 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_log_debug1(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                    "hls: close fragment n=%uL", ctx->frag);
 
-    char * pch;
-    char str[256];
-    memset(str, 0, 256);
-    strcpy(str, &ctx->args);
-    pch=strchr(str,'&');
-    int start = 0;
-    int end = 0;
-    char bucket[256];
-//    char access_key[256];
-//    char expires[256];
-    memset(bucket, 0, 256);
-//    memset(access_key, 0, 256);
-//    memset(expires, 0, 256);
+    char keyname[256];
+    memset(keyname, 0, 256);
+    ngx_cpystrn(keyname, ctx->Channel ,strlen(ctx->Channel) + 1);
+    ngx_cpystrn(keyname+strlen(keyname), "/" , 1 + 1);
+    ngx_cpystrn(keyname+strlen(keyname), basename(ctx->stream.data), strlen(basename(ctx->stream.data))+1);
 
-    while (pch!=NULL)
-    {
-        char buf[256];
-        memset(buf, 0, 256);
-        snprintf(buf, pch-str+1-start, str+start);
-        start = pch-str+1;
-        if (strncmp(buf,"Bucket=",7) == 0) {
-            strcpy(bucket, buf+7);
-        }
-//        if (strncmp(buf,"AccessKeyId=",12) == 0) {
-//            strcpy(access_key, buf+12);
-//        }
-//        if (strncmp(buf,"Expires=",8) == 0) {
-//            strcpy(expires, buf+8);
-//        }
-        pch=strchr(pch+1,'&');
-    }
-
-//    printf("%s\n", bucket);
-//    printf("%s\n", access_key);
-//    printf("%s\n", expires);
-
-    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "10.254.3.68", bucket, basename(ctx->stream.data), "yly", "yly", "private");
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "127.0.0.1", ctx->Bucket, keyname, "admin", "admin", "private");
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s, "10.254.3.68", bucket, "yly", "yly", "private");
+    ngx_rtmp_hls_write_playlist(s, "127.0.0.1", ctx->Bucket, "admin", "admin", "private", ctx->Channel);
 
     return NGX_OK;
 }
@@ -1470,6 +1444,48 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
         }
     }
 
+    ngx_cpystrn(ctx->Channel, v->name, strlen(v->name) + 1);
+
+    char * str = v->args;
+    char * pch;
+    pch=strchr(str,'&');
+    int start = 0;
+
+    char *last = "false";
+
+    while (pch!=NULL)
+    {
+        char buf[256];
+        memset(buf, 0, 256);
+        if (!strcmp(last, "false")) {
+            snprintf(buf, pch-str+1 - start, str + start);
+            start = pch-str+1;
+        } else {
+            snprintf(buf, 256, pch + 1);
+        }
+        if (strncmp(buf,"Bucket=",7) == 0) {
+            strcpy(ctx->Bucket, buf+7);
+        }
+        if (strncmp(buf,"playlistName=",13) == 0) {
+            strcpy(ctx->playlistName, buf+13);
+        }
+        if (strncmp(buf,"AccessKeyId=",12) == 0) {
+            strcpy(ctx->AccessKeyId, buf+12);
+        }
+        if (strncmp(buf,"Expires=",8) == 0) {
+            strcpy(ctx->Expires, buf+8);
+        }
+        if (strncmp(buf,"Signature=",10) == 0) {
+            strcpy(ctx->Signature, buf+10);
+        }
+        char* cur = pch;
+        pch=strchr(pch+1,'&');
+        if (cur[0] == '&' && pch == NULL && !strcmp(last, "false")) {
+            pch = cur;
+            last = "true";
+        }
+    }
+
     if (ctx->frags == NULL) {
         ctx->frags = ngx_pcalloc(s->connection->pool,
                                  sizeof(ngx_rtmp_hls_frag_t) *
@@ -1485,15 +1501,16 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
         return NGX_ERROR;
     }
 
-    ctx->name.len = ngx_strlen(v->name);
+    ctx->name.len = ngx_strlen(v->name) + ngx_strlen(ctx->Bucket);
     ctx->name.data = ngx_palloc(s->connection->pool, ctx->name.len + 1);
     ngx_cpystrn(ctx->args, v->args, NGX_RTMP_MAX_ARGS);
 
     if (ctx->name.data == NULL) {
         return NGX_ERROR;
     }
-
-    *ngx_cpymem(ctx->name.data, v->name, ctx->name.len) = 0;
+    u_char *ppp;
+    ppp = ngx_cpymem(ctx->name.data, ctx->Bucket, ngx_strlen(ctx->Bucket));
+    *ngx_cpymem(ppp, v->name, ngx_strlen(v->name)) = 0;
 
     len = hacf->path.len + 1 + ctx->name.len + sizeof(".m3u8");
     if (hacf->nested) {
@@ -1576,6 +1593,13 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
     ctx->playlist.len = p - ctx->playlist.data;
 
     *p = 0;
+
+    if (strlen(ctx->playlistName) > 5) {
+        ctx->playlist.data = ngx_palloc(s->connection->pool,
+                                        strlen(ctx->playlistName));
+        ngx_memcpy(ctx->playlist.data, ctx->playlistName, strlen(ctx->playlistName));
+        ctx->playlist.len = strlen(ctx->playlistName);
+    }
 
     /* playlist bak (new playlist) path */
 
