@@ -125,6 +125,7 @@ typedef struct {
     ngx_str_t                           key_path;
     ngx_str_t                           key_url;
     ngx_uint_t                          frags_per_key;
+    ngx_str_t                           s3_endpoint;
 } ngx_rtmp_hls_app_conf_t;
 
 
@@ -318,6 +319,14 @@ static ngx_command_t ngx_rtmp_hls_commands[] = {
       NGX_RTMP_APP_CONF_OFFSET,
       offsetof(ngx_rtmp_hls_app_conf_t, frags_per_key),
       NULL },
+
+    { ngx_string("s3_endpoint"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_hls_app_conf_t, s3_endpoint),
+      NULL },
+
 
     ngx_null_command
 };
@@ -940,7 +949,9 @@ static ngx_int_t
 ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
 {
     ngx_rtmp_hls_ctx_t         *ctx;
+    ngx_rtmp_hls_app_conf_t    *hacf;
 
+    hacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_hls_module);
     ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
     if (ctx == NULL || !ctx->opened) {
         return NGX_OK;
@@ -955,13 +966,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_cpystrn(keyname+strlen(keyname), "/" , 1 + 1);
     ngx_cpystrn(keyname+strlen(keyname), basename(ctx->stream.data), strlen(basename(ctx->stream.data))+1);
 
-    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, "127.0.0.1", ctx->Bucket, keyname, "admin", "admin", "private");
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, hacf->s3_endpoint.data, ctx->Bucket, keyname, "admin", "admin", "private");
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s, "127.0.0.1", ctx->Bucket, "admin", "admin", "private", ctx->Channel);
+    ngx_rtmp_hls_write_playlist(s, hacf->s3_endpoint.data, ctx->Bucket, "admin", "admin", "private", ctx->Channel);
 
     return NGX_OK;
 }
@@ -2525,6 +2536,7 @@ ngx_rtmp_hls_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->key_path, prev->key_path, "");
     ngx_conf_merge_str_value(conf->key_url, prev->key_url, "");
     ngx_conf_merge_uint_value(conf->frags_per_key, prev->frags_per_key, 0);
+    ngx_conf_merge_str_value(conf->s3_endpoint, prev->s3_endpoint, "");
 
     if (conf->fraglen) {
         conf->winfrags = conf->playlen / conf->fraglen;
