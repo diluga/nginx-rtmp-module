@@ -7,6 +7,47 @@
 ./configure --add-module=../nginx-rtmp-module --with-debug --with-cc-opt='-O0 -g -Wno-error' --with-ld-opt="/usr/lib64/libs3.a  -lxml2 -lz -lm -ldl -lcurl -lpthread"
 ```
 
+```
+user root;
+master_process off;
+daemon off;
+error_log /tmp/nginx.log debug;
+events {
+    worker_connections  1024;
+}
+rtmp {
+    server {
+        listen 1935;
+        chunk_size 4000;
+        application hls {
+            s3_endpoint 192.168.153.181;
+            s3_hls_access_key admin;
+            s3_hls_secret_key admin;
+            live on;
+            hls_nested on;
+            hls on;
+            hls_path /usr/local/nginx/html/;
+            hls_fragment 2s;
+            hls_playlist_length 20s;
+            hls_fragment_naming system;
+            hls_cleanup on;
+            on_publish http://192.168.153.181:5000/auth;
+            on_publish_done http://192.168.153.181:5000/publish_done;
+        }
+    }
+}
+
+```
+
+public
+```
+ffmpeg -re -i test.flv -vcodec libx264 -vprofile baseline -acodec aac -ar 44100 -strict -2 -ac 1 -f flv -s 640x480 -q 10 "rtmp://192.168.153.181:1935/hls/test2?Bucket=aws4rtmp2&AccessKeyId=yly&Expires=1531577153&Signature=R3nzz6yaT63CKad4WJ6b0JTdFgk=&Acl=public-read"
+```
+auth
+```
+ffmpeg -re -i test.flv -vcodec libx264 -vprofile baseline -acodec aac -ar 44100 -strict -2 -ac 1 -f flv -s 640x480 -q 10 "rtmp://192.168.153.181:1935/hls/test2?Bucket=aws4rtmp2&AccessKeyId=yly&Expires=1531577153&Signature=R3nzz6yaT63CKad4WJ6b0JTdFgk="
+```
+
 # NGINX-based Media Streaming Server
 ## nginx-rtmp-module
 

@@ -90,6 +90,7 @@ typedef struct {
     u_char                              Expires[256];
     u_char                              Signature[256];
     u_char                              Channel[256];
+    u_char                              Acl[25];
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -126,6 +127,8 @@ typedef struct {
     ngx_str_t                           key_url;
     ngx_uint_t                          frags_per_key;
     ngx_str_t                           s3_endpoint;
+    ngx_str_t                           s3_hls_access_key;
+    ngx_str_t                           s3_hls_secret_key;
 } ngx_rtmp_hls_app_conf_t;
 
 
@@ -327,6 +330,19 @@ static ngx_command_t ngx_rtmp_hls_commands[] = {
       offsetof(ngx_rtmp_hls_app_conf_t, s3_endpoint),
       NULL },
 
+    { ngx_string("s3_hls_access_key"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_hls_app_conf_t, s3_hls_access_key),
+      NULL },
+
+    { ngx_string("s3_hls_secret_key"),
+      NGX_RTMP_MAIN_CONF|NGX_RTMP_SRV_CONF|NGX_RTMP_APP_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_RTMP_APP_CONF_OFFSET,
+      offsetof(ngx_rtmp_hls_app_conf_t, s3_hls_secret_key),
+      NULL },
 
     ngx_null_command
 };
@@ -643,11 +659,21 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         int64_t expires = time(NULL) + 60 * 60; // Current time + 60 minutes
         S3_generate_authenticated_query_string(presigned_buffer, &bucketContext, key_buffer, expires, NULL);
 
+        if (!strcmp(acl, "public-read")) {
+            char public_url[256];
+            memset(public_url, 0, 256);
+            ngx_slprintf(public_url, public_url+256, "http://%s/%s/%s", host, bucket, key_buffer);
+            p = ngx_slprintf(p, end,
+                             "#EXTINF:%.3f,\n"
+                               "%V%s\n",
+                             f->duration, &hacf->base_url, public_url);
+        } else {
+            p = ngx_slprintf(p, end,
+                             "#EXTINF:%.3f,\n"
+                               "%V%s\n",
+                             f->duration, &hacf->base_url, presigned_buffer);
+        }
 
-        p = ngx_slprintf(p, end,
-                         "#EXTINF:%.3f,\n"
-                           "%V%s\n",
-                         f->duration, &hacf->base_url, presigned_buffer);
 
         ngx_log_debug5(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
                        "hls: fragment frag=%uL, n=%ui/%ui, duration=%.3f, "
@@ -712,6 +738,26 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         secret_key
       };
 
+    S3CannedAcl cannedAcl;
+    if (!strcmp(acl, "private")) {
+        cannedAcl = S3CannedAclPrivate;
+    }
+    else if (!strcmp(acl, "public-read")) {
+        cannedAcl = S3CannedAclPublicRead;
+    }
+    else if (!strcmp(acl, "public-read-write")) {
+        cannedAcl = S3CannedAclPublicReadWrite;
+    }
+    else if (!strcmp(acl, "bucket-owner-full-control")) {
+        cannedAcl = S3CannedAclBucketOwnerFullControl;
+    }
+    else if (!strcmp(acl, "authenticated-read")) {
+        cannedAcl = S3CannedAclAuthenticatedRead;
+    }
+    else {
+        return NGX_ERROR;
+    }
+
     S3PutProperties putProperties =
       {
         0, //content-type defaults to "binary/octet-stream"
@@ -720,7 +766,7 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s, u_char *host, u_char *bucket,
         0, //contentDispositionFilename, This is only relevent for objects which are intended to be shared to users via web browsers and which is additionally intended to be downloaded rather than viewed.
         0, //contentEncoding, This is only applicable to encoded (usually, compressed) content, and only relevent if the object is intended to be downloaded via a browser.
         (int64_t)-1,  //expires, This information is typically only delivered to users who download the content via a web browser.
-        S3CannedAclBucketOwnerFullControl,
+        cannedAcl,
         0, //metaPropertiesCount, This is the number of values in the metaData field.
         0 //metaProperties
       };
@@ -966,13 +1012,13 @@ ngx_rtmp_hls_close_fragment(ngx_rtmp_session_t *s)
     ngx_cpystrn(keyname+strlen(keyname), "/" , 1 + 1);
     ngx_cpystrn(keyname+strlen(keyname), basename(ctx->stream.data), strlen(basename(ctx->stream.data))+1);
 
-    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, hacf->s3_endpoint.data, ctx->Bucket, keyname, "admin", "admin", "private");
+    ngx_rtmp_mpegts_close_file(&ctx->file, ctx->stream.data, hacf->s3_endpoint.data, ctx->Bucket, keyname, hacf->s3_hls_access_key.data, hacf->s3_hls_secret_key.data, ctx->Acl);
 
     ctx->opened = 0;
 
     ngx_rtmp_hls_next_frag(s);
 
-    ngx_rtmp_hls_write_playlist(s, hacf->s3_endpoint.data, ctx->Bucket, "admin", "admin", "private", ctx->Channel);
+    ngx_rtmp_hls_write_playlist(s, hacf->s3_endpoint.data, ctx->Bucket, hacf->s3_hls_access_key.data, hacf->s3_hls_secret_key.data, ctx->Acl, ctx->Channel);
 
     return NGX_OK;
 }
@@ -1489,6 +1535,17 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
         if (strncmp(buf,"Signature=",10) == 0) {
             strcpy(ctx->Signature, buf+10);
         }
+        if (strncmp(buf,"Acl=",4) == 0) {
+            strcpy(ctx->Acl, buf+4);
+            if (strcmp(ctx->Acl, "private") || strcmp(ctx->Acl, "private")
+                || strcmp(ctx->Acl, "public-read") || strcmp(ctx->Acl, "public-read-write")
+                || strcmp(ctx->Acl, "authenticated-read") || strcmp(ctx->Acl, "bucket-owner-read")
+                || strcmp(ctx->Acl, "bucket-owner-full-control"))  {
+
+            } else {
+                strcpy(ctx->Acl, "bucket-owner-full-control");
+            }
+        }
         char* cur = pch;
         pch=strchr(pch+1,'&');
         if (cur[0] == '&' && pch == NULL && !strcmp(last, "false")) {
@@ -1496,6 +1553,8 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
             last = "true";
         }
     }
+    if(strlen(ctx->Acl)==0)
+        strcpy(ctx->Acl, "bucket-owner-full-control");
 
     if (ctx->frags == NULL) {
         ctx->frags = ngx_pcalloc(s->connection->pool,
@@ -1514,7 +1573,6 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
 
     ctx->name.len = ngx_strlen(v->name) + ngx_strlen(ctx->Bucket);
     ctx->name.data = ngx_palloc(s->connection->pool, ctx->name.len + 1);
-    ngx_cpystrn(ctx->args, v->args, NGX_RTMP_MAX_ARGS);
 
     if (ctx->name.data == NULL) {
         return NGX_ERROR;
@@ -2537,6 +2595,8 @@ ngx_rtmp_hls_merge_app_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->key_url, prev->key_url, "");
     ngx_conf_merge_uint_value(conf->frags_per_key, prev->frags_per_key, 0);
     ngx_conf_merge_str_value(conf->s3_endpoint, prev->s3_endpoint, "");
+    ngx_conf_merge_str_value(conf->s3_hls_access_key, prev->s3_hls_access_key, "");
+    ngx_conf_merge_str_value(conf->s3_hls_secret_key, prev->s3_hls_secret_key, "");
 
     if (conf->fraglen) {
         conf->winfrags = conf->playlen / conf->fraglen;

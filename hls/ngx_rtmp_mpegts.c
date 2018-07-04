@@ -453,7 +453,25 @@ ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file, u_char *path, u_char *h
         access_key,
         secret_key
       };
-
+    S3CannedAcl cannedAcl;
+    if (!strcmp(acl, "private")) {
+        cannedAcl = S3CannedAclPrivate;
+    }
+    else if (!strcmp(acl, "public-read")) {
+        cannedAcl = S3CannedAclPublicRead;
+    }
+    else if (!strcmp(acl, "public-read-write")) {
+        cannedAcl = S3CannedAclPublicReadWrite;
+    }
+    else if (!strcmp(acl, "bucket-owner-full-control")) {
+        cannedAcl = S3CannedAclBucketOwnerFullControl;
+    }
+    else if (!strcmp(acl, "authenticated-read")) {
+        cannedAcl = S3CannedAclAuthenticatedRead;
+    }
+    else {
+        return NGX_ERROR;
+    }
     S3PutProperties putProperties =
       {
         0, //content-type defaults to "binary/octet-stream"
@@ -462,7 +480,7 @@ ngx_rtmp_mpegts_close_file(ngx_rtmp_mpegts_file_t *file, u_char *path, u_char *h
         0, //contentDispositionFilename, This is only relevent for objects which are intended to be shared to users via web browsers and which is additionally intended to be downloaded rather than viewed.
         0, //contentEncoding, This is only applicable to encoded (usually, compressed) content, and only relevent if the object is intended to be downloaded via a browser.
         (int64_t)-1,  //expires, This information is typically only delivered to users who download the content via a web browser.
-        S3CannedAclBucketOwnerFullControl,
+        cannedAcl,
         0, //metaPropertiesCount, This is the number of values in the metaData field.
         0 //metaProperties
       };
