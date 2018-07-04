@@ -1561,6 +1561,8 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
     }
     if(strlen(ctx->Acl)==0)
         strcpy(ctx->Acl, "bucket-owner-full-control");
+    if(strlen(ctx->Bucket)==0)
+        return NGX_ERROR;  //Bucket must exist
 
     if (ctx->frags == NULL) {
         ctx->frags = ngx_pcalloc(s->connection->pool,
